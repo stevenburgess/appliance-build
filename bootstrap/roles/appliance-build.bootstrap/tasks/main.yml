@@ -1,5 +1,5 @@
 #
-# Copyright 2018 Delphix
+# Copyright 2018-2019 Delphix
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -19,23 +19,90 @@
   register: toplevel
 
 - apt:
-    name: aptitude
+    name: software-properties-common
     state: present
+    update_cache: yes
 
-- apt:
+- apt_repository:
+    repo: ppa:ansible/ansible
     update_cache: yes
 
 - apt:
-    upgrade: yes
+    upgrade: dist
 
 - apt:
-    name: "{{ item }}"
+    name:
+      - ansible
+      - aptly
+      - awscli
+      - bc
+      - coreutils
+      - equivs
+      - gdisk
+      - git
+      - java-package
+      - jq
+      - kpartx
+      - libxt6
+      - livecd-rootfs
+      - make
+      - man
+      - openjdk-8-jre-headless
+      - pigz
+      - qemu
+      - rename
+      - shellcheck
+      - vim
+      - zfsutils-linux
     state: present
+
+- modprobe:
+    name: zfs
+    state: present
+
+- shell: |
+    ( wget -nv http://artifactory.delphix.com/artifactory/gradle-distributions/gradle-5.1-bin.zip || \
+      wget -nv https://services.gradle.org/distributions/gradle-5.1-bin.zip ) && \
+    sha256sum -c <<< '7506638a380092a0406364c79d6c87d03d23017fc25a5770379d1ce23c3fcd4d  gradle-5.1-bin.zip' && \
+    mkdir /opt/gradle && \
+    unzip -d /opt/gradle gradle-5.1-bin.zip && \
+    rm gradle-5.1-bin.zip
+  args:
+    creates: /opt/gradle
+    executable: /bin/bash
+    warn: no
+
+- shell: |
+    wget -nv -O /usr/local/bin/shfmt \
+      https://github.com/mvdan/sh/releases/download/v2.4.0/shfmt_v2.4.0_linux_amd64 && \
+    chmod +x /usr/local/bin/shfmt
+  args:
+    creates: /usr/local/bin/shfmt
+    executable: /bin/bash
+    warn: no
+
+- shell: |
+    git clone https://github.com/willthames/ansible-lint /opt/ansible-lint && \
+    cd /opt/ansible-lint && \
+    git checkout v3.4.21 && \
+    git branch -D master
+  args:
+    creates: /opt/ansible-lint
+    executable: /bin/bash
+
+- lineinfile:
+    path: /etc/profile.d/appliance-build.sh
+    regexp: '^{{ item.key }}='
+    line: '{{ item.key }}="{{ item.value }}"'
+    create: yes
   with_items:
-    - docker.io
-    - python3-docker
-    - qemu
-    - zfsutils-linux
+    - { key: 'PYTHONPATH', value: '${PYTHONPATH}:/opt/ansible-lint/lib' }
+    - { key: 'PATH', value: '${PATH}:/opt/ansible-lint/bin:/opt/gradle/gradle-5.1/bin' }
+
+- apt:
+    name:
+      - docker.io
+    state: present
 
 #
 # We can't use the docker_image module because it doesn't yet support passing
@@ -43,7 +110,3 @@
 # we need to be able to fetch things from Artifactory.
 #
 - shell: docker build --network host --tag "appliance-build:latest" "{{ toplevel.stdout }}/docker"
-
-- modprobe:
-    name: zfs
-    state: present
